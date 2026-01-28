@@ -18,6 +18,11 @@ const tempEl             = document.getElementById("temperature");
 const humEl              = document.getElementById("humidity");
 const soilEl             = document.getElementById("soilMoisture");
 
+const uptimeEl           = document.getElementById("uptime");
+const controlModeEl      = document.getElementById("controlMode");
+const lightStateEl       = document.getElementById("lightState");
+const pumpStateEl        = document.getElementById("pumpState");
+
 const modeRadioAuto      = document.querySelector('input[name="mode"][value="auto"]');
 const modeRadioManual    = document.querySelector('input[name="mode"][value="manual"]');
 
@@ -327,58 +332,74 @@ function attachMqttHandlers(client) {
 	client.on("message", (topic, payload) => {
 		let msg = null;
 		try {
-		msg = JSON.parse(payload.toString());
+			msg = JSON.parse(payload.toString());
 		} catch (e) {
-		console.warn("Invalid JSON on", topic, payload.toString());
-		return;
+			console.warn("Invalid JSON on", topic, payload.toString());
+			return;
 		}
 
 		if (topic.startsWith(`${ROOT_TOPIC}/status/`)) {
-		lastStatusTimestampMs = Date.now();
-		updateLastUpdateText();
+			lastStatusTimestampMs = Date.now();
+			updateLastUpdateText();
 		}
 
 		if (topic === `${ROOT_TOPIC}/status/light`) {
-		lastStatusLightLux = (msg && typeof msg.lux !== "undefined") ? msg.lux : null;
-		setText(lightLuxEl, lastStatusLightLux);
+			lastStatusLightLux = (msg && typeof msg.lux !== "undefined") ? msg.lux : null;
+			setText(lightLuxEl, lastStatusLightLux);
 		} else if (topic === `${ROOT_TOPIC}/status/environment`) {
-		lastStatusTemp = (msg && typeof msg.temperature_c !== "undefined") ? msg.temperature_c : null;
-		lastStatusHum  = (msg && typeof msg.humidity_pct !== "undefined") ? msg.humidity_pct : null;
-		setText(tempEl, lastStatusTemp);
-		setText(humEl, lastStatusHum);
+			lastStatusTemp = (msg && typeof msg.temperature_c !== "undefined") ? msg.temperature_c : null;
+			lastStatusHum  = (msg && typeof msg.humidity_pct !== "undefined") ? msg.humidity_pct : null;
+			setText(tempEl, lastStatusTemp);
+			setText(humEl, lastStatusHum);
 		} else if (topic === `${ROOT_TOPIC}/status/soil`) {
-		lastStatusSoil = (msg && typeof msg.moisture !== "undefined") ? msg.moisture : null;
-		setText(soilEl, lastStatusSoil);
+			lastStatusSoil = (msg && typeof msg.moisture !== "undefined") ? msg.moisture : null;
+			setText(soilEl, lastStatusSoil);
 		} else if (topic === `${ROOT_TOPIC}/status/effectors`) {
-		// authoritative desired effector state from device
-		if (msg) {
-			if (typeof msg.light_on !== "undefined") {
-			currentDesiredLight = !!msg.light_on;
+			if (msg) {
+				if (typeof msg.light_on !== "undefined") {
+					currentDesiredLight = !!msg.light_on;
+				} else {
+					currentDesiredLight = null;
+				}
+				if (typeof msg.pump_on !== "undefined") {
+					currentDesiredPump = !!msg.pump_on;
+				} else {
+					currentDesiredPump = null;
+				}
+				if (typeof msg.mode !== "undefined") {
+					currentMode = String(msg.mode);
+				} else {
+					currentMode = null;
+				}
 			} else {
-			currentDesiredLight = null;
+				currentDesiredLight = null;
+				currentDesiredPump = null;
+				currentMode = null;
 			}
-			if (typeof msg.pump_on !== "undefined") {
-			currentDesiredPump = !!msg.pump_on;
-			} else {
-			currentDesiredPump = null;
-			}
-			if (typeof msg.mode !== "undefined") {
-			currentMode = String(msg.mode);
-			} else {
-			currentMode = null;
-			}
-		} else {
-			currentDesiredLight = null;
-			currentDesiredPump = null;
-			currentMode = null;
-		}
+			applyDeviceStatusToUI(); // Reflect to UI
 
-		// Reflect to UI
-		applyDeviceStatusToUI();
+			setText(controlModeEl, currentMode);
+
+			setText(lightStateEl,
+				currentDesiredLight === null ? null : (currentDesiredLight ? "ON" : "OFF")
+			);
+
+			setText(pumpStateEl,
+				currentDesiredPump === null ? null : (currentDesiredPump ? "ON" : "OFF")
+			);
 		} else if (topic === `${ROOT_TOPIC}/status/system`) {
-		// ignore for now, could display uptime etc.
+			if (msg && typeof msg.uptime_s === "number") {
+				const s = msg.uptime_s;
+				const h = Math.floor(s / 3600);
+				const m = Math.floor((s % 3600) / 60);
+				const sec = s % 60;
+
+				uptimeEl.textContent = `${h}h ${m}m ${sec}s`;
+			} else {
+				setText(uptimeEl, null);
+			}
 		} else {
-		// ignore unknown topics
+			// ignore unknown topics
 		}
 	});
 }
@@ -468,6 +489,10 @@ setText(lightLuxEl, null);
 setText(tempEl, null);
 setText(humEl, null);
 setText(soilEl, null);
+setText(uptimeEl, null);
+setText(controlModeEl, null);
+setText(lightStateEl, null);
+setText(pumpStateEl, null);
 connectionStatusEl.textContent = "disconnected";
 desiredLightCb.disabled = true;
 desiredPumpCb.disabled = true;
