@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<title>Greenhouse</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+	<style>
+		body {
+			font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+			margin: 0;
+			padding: 1rem;
+			background: #fafafa;
+			color: #111;
+		}
+
+		h1 {
+			margin-top: 0;
+		}
+
+		.section {
+			margin-bottom: 1.5rem;
+			padding: 1rem;
+			background: #ffffff;
+			border: 1px solid #ddd;
+			border-radius: 6px;
+		}
+
+		.label {
+			font-weight: 600;
+		}
+
+		.value {
+			font-family: monospace;
+		}
+
+		button {
+			width: 100%;
+			padding: 0.75rem;
+			font-size: 1rem;
+			margin-top: 0.5rem;
+		}
+
+		.status-line {
+			font-size: 0.9rem;
+			color: #555;
+		}
+	</style>
+</head>
+
+<body>
+
+	<!-- ---------- MAIN APP ---------- -->
+	<div>
+
+		<!-- Header / connection state -->
+		<div class="section">
+			<h1>Greenhouse</h1>
+			<div class="status-line">
+				Connection: <span id="connectionStatus">disconnected</span>
+			</div>
+			<div class="status-line">
+				Last update: <span id="lastUpdate">—</span>
+			</div>
+		</div>
+
+		<div class="section">
+			<h2>MQTT Connection</h2>
+
+			<input
+				id="mqttPassphrase"
+				type="password"
+				placeholder="Access passphrase"
+				style="width: 100%; padding: 0.5rem; font-size: 1rem;"
+			/>
+
+			<button id="mqttConnectButton" style="margin-top: 0.5rem;">
+				Connect
+			</button>
+
+			<p id="mqttError" style="color: #b00020; display: none;">
+				Failed to connect.
+			</p>
+		</div>
+
+		<!-- Sensors / environmental status -->
+		<div class="section">
+			<h2>Environment</h2>
+
+			<div><span class="label">Light:</span>
+				<span class="value" id="lightLux">—</span> lx
+			</div>
+
+			<div><span class="label">Temperature:</span>
+				<span class="value" id="temperature">—</span> °C
+			</div>
+
+			<div><span class="label">Humidity:</span>
+				<span class="value" id="humidity">—</span> %
+			</div>
+
+			<div><span class="label">Soil moisture:</span>
+				<span class="value" id="soilMoisture">—</span>
+			</div>
+		</div>
+
+		<!-- Effectors / desired state -->
+		<div class="section">
+			<h2>System</h2>
+
+			<div><span class="label">Mode:</span>
+				<span class="value" id="controlMode">—</span>
+			</div>
+
+			<div><span class="label">Light:</span>
+				<span class="value" id="lightState">—</span>
+			</div>
+
+			<div><span class="label">Pump:</span>
+				<span class="value" id="pumpState">—</span>
+			</div>
+		</div>
+
+		<!-- Controls -->
+		<div class="section">
+			<h2>Commands</h2>
+
+			<!-- Mode selection -->
+			<div style="margin-bottom: 1rem;">
+				<div class="label">Mode</div>
+				<label>
+					<input type="radio" name="mode" value="auto" checked />
+					Auto
+				</label>
+				<label style="margin-left: 1rem;">
+					<input type="radio" name="mode" value="manual" />
+					Manual
+				</label>
+			</div>
+
+			<!-- Desired effector state -->
+			<fieldset style="margin-bottom: 1rem;">
+				<legend class="label">Desired effectors</legend>
+
+				<div>
+					<label>
+						<input type="checkbox" id="desiredLight" disabled />
+						Light on
+					</label>
+				</div>
+
+				<div>
+					<label>
+						<input type="checkbox" id="desiredPump" disabled />
+						Pump on
+					</label>
+				</div>
+
+				<p class="status-line">
+					Effectors can only be commanded in manual mode.
+				</p>
+			</fieldset>
+
+			<!-- Send -->
+			<button id="sendCommandsButton" disabled>
+				Send commands
+			</button>
+		</div>
+
+	</div>
+
+	<!-- External libraries -->
+	<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+	<!-- App logic -->
+	<script src="app.js"></script>
+
+</body>
+</html>
