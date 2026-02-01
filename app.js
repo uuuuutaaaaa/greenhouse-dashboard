@@ -1,39 +1,39 @@
 // app.js
 
-const MQTT_CLUSTER_HOST  = "675c9b4309ee46008e3a7726f2c1969d.s1.eu.hivemq.cloud"; 	// e.g. xxxxxxx.s1.eu.hivemq.cloud
-const MQTT_WS_PORT       = 8884;													// HiveMQ Cloud WebSockets port
-const MQTT_USERNAME      = "user1";													// MQTT credential username
+const MQTT_CLUSTER_HOST  = "675c9b4309ee46008e3a7726f2c1969d.s1.eu.hivemq.cloud";
+const MQTT_WS_PORT       = 8884; // HiveMQ Cloud WebSockets port
+const MQTT_USERNAME      = "user1";
 const ROOT_TOPIC         = "greenhouse";
 
 // UI elements
-const connectionStatusEl = document.getElementById("connectionStatus");
-const lastUpdateEl       = document.getElementById("lastUpdate");
+const connectionStatusEl        = document.getElementById("connectionStatus");
+const lastUpdateEl              = document.getElementById("lastUpdate");
 
-const mqttPassphraseEl   = document.getElementById("mqttPassphrase");
-const mqttConnectBtn     = document.getElementById("mqttConnectButton");
-const mqttErrorEl        = document.getElementById("mqttError");
+const mqttPassphraseEl          = document.getElementById("mqttPassphrase");
+const mqttConnectBtn            = document.getElementById("mqttConnectButton");
+const mqttErrorEl               = document.getElementById("mqttError");
 
-const lightLuxEl         = document.getElementById("lightLux");
-const tempEl             = document.getElementById("temperature");
-const humEl              = document.getElementById("humidity");
-const soilEl             = document.getElementById("soilMoisture");
+const lightLuxEl                = document.getElementById("lightLux");
+const tempEl                    = document.getElementById("temperature");
+const humEl                     = document.getElementById("humidity");
+const soilEl                    = document.getElementById("soilMoisture");
 
-const uptimeEl           = document.getElementById("uptime");
-const controlModeEl      = document.getElementById("controlMode");
-const lightStateEl       = document.getElementById("lightState");
-const pumpStateEl        = document.getElementById("pumpState");
+const uptimeEl                  = document.getElementById("uptime");
+const controlModeEl             = document.getElementById("controlMode");
+const lightStateEl              = document.getElementById("lightState");
+const pumpStateEl               = document.getElementById("pumpState");
 
-const modeRadioAuto      = document.querySelector('input[name="mode"][value="auto"]');
-const modeRadioManual    = document.querySelector('input[name="mode"][value="manual"]');
+const modeRadioAuto             = document.querySelector('input[name="mode"][value="auto"]');
+const modeRadioManual           = document.querySelector('input[name="mode"][value="manual"]');
 
-const desiredLightCb     = document.getElementById("desiredLight");
-const desiredPumpCb      = document.getElementById("desiredPump");
-const sendCommandsBtn    = document.getElementById("sendCommandsButton");
+const commandDesiredLightCb     = document.getElementById("desiredLight");
+const commandDesiredPumpCb      = document.getElementById("desiredPump");
+const commandSendBtn           = document.getElementById("sendCommandsButton");
 
 // Timestamp
-let lastStatusTimestampMs = null;
+let lastStatusTimestampMs       = null;
 
-// MQTT
+// MQTT statuses
 let client     = null;
 let connected  = false;
 let connecting = false;
@@ -44,15 +44,16 @@ let lastStatusTemp      = null;
 let lastStatusHum       = null;
 let lastStatusSoil      = null;
 
-// Internal state mirrored from device status
-let currentDesiredLight = null; // boolean or null
-let currentDesiredPump  = null; // boolean or null
-let currentMode         = null; // "auto" | "manual" | null
+// Last device state
+let lastUptime       = null; // number or null
+let lastDesiredLight = null; // boolean or null
+let lastDesiredPump  = null; // boolean or null
+let lastMode         = null; // "auto" | "manual" | null
 
-// Local edit buffer (what the user has set in the checkboxes)
-let editedDesiredLight  = null;
-let editedDesiredPump   = null;
-let editedMode          = null;
+// Edited device state from Commands
+let commandDesiredLight  = false;
+let commandDesiredPump   = false;
+let commandMode          = "auto";
 
 // Encrypted MQTT password
 const ENCRYPTED_MQTT_PASSWORD = {
@@ -104,6 +105,15 @@ if (mqttConnectBtn) {
 		});
 
 		attachMqttHandlers(client);
+	});
+}
+
+if (mqttPassphraseEl) {
+	mqttPassphraseEl.addEventListener("keydown", (e) => {
+		if (e.key === "Enter") {
+			e.preventDefault();
+			mqttConnectBtn?.click();
+		}
 	});
 }
 
@@ -166,9 +176,25 @@ function setText(el, v) {
 	else el.textContent = String(v);
 }
 
-function boolToText(b) {
+function valueToText(b) {
 	if (b === null || b === undefined) return "—";
-	return b ? "ON" : "OFF";
+	if (typeof b === "boolean") return b ? "ON" : "OFF";
+	if (typeof b === "number") {
+		if (b % 1 === 0) return String(b);
+		return b.toFixed(2);
+	}
+	return String(b);
+}
+
+function displayTime(seconds) {
+	if (seconds === null || seconds === undefined) return "—";
+	seconds = Number(seconds);
+	if (Number.isNaN(seconds)) return "—";
+	if (seconds < 60) return `${seconds}s`;
+	const m = Math.floor((seconds % 3600) / 60);
+	if (seconds < 3600) return `${m}m ${seconds % 60}s`;
+	const h = Math.floor(seconds / 3600);
+	return `${h}h ${m}m ${seconds % 60}s`;
 }
 
 function showMqttError(message, detail = null) {
@@ -190,56 +216,26 @@ function clearMqttError() {
 }
 
 function updateControlsEnabledState() {
-	// Controls editable only if user-selected MODE is "manual" (UI), AND connected
 	const uiSelectedManual = modeRadioManual && modeRadioManual.checked;
 	const editable = connected && uiSelectedManual;
 
-	if (desiredLightCb) desiredLightCb.disabled = !editable;
-	if (desiredPumpCb) desiredPumpCb.disabled = !editable;
-
-	// Send enabled only if editable AND (there is a change to send)
-	const modeChange = (editedMode !== null && editedMode !== currentMode);
-	const effChange = (() => {
-		// if editedDesired is null that means user hasn't touched the checkbox
-		const p1 = (editedDesiredLight !== null) && (editedDesiredLight !== currentDesiredLight);
-		const p2 = (editedDesiredPump !== null) && (editedDesiredPump !== currentDesiredPump);
-		return p1 || p2;
-	})();
-
-	sendCommandsBtn.disabled = !(editable && (modeChange || effChange));
+	if (commandDesiredLightCb) commandDesiredLightCb.disabled = !editable;
+	if (commandDesiredPumpCb) commandDesiredPumpCb.disabled = !editable;
+	if (commandSendBtn) commandSendBtn.disabled = !connected;
 }
 
 function applyDeviceStatusToUI() {
-	// update DOM values
-	setText(lightLuxEl, lastStatusLightLux);
-	setText(tempEl, lastStatusTemp);
-	setText(humEl, lastStatusHum);
-	setText(soilEl, lastStatusSoil);
-
-	// effectors status
-	if (currentDesiredLight !== null) {
-		desiredLightCb.checked = currentDesiredLight;
-	} else {
-		desiredLightCb.checked = false;
-	}
-	if (currentDesiredPump !== null) {
-		desiredPumpCb.checked = currentDesiredPump;
-	} else {
-		desiredPumpCb.checked = false;
-	}
-
-	// mode radio should reflect currentMode only as "device reported"; user may choose a different radio before sending.
-	if (currentMode === "auto") {
-		modeRadioAuto.checked = true;
-	} else if (currentMode === "manual") {
-		modeRadioManual.checked = true;
-	}
-
-	// reset edited buffers
-	editedDesiredLight = null;
-	editedDesiredPump = null;
-	editedMode = null;
-
+	if (!(lastStatusLightLux === null || lastStatusLightLux === undefined || lastStatusLightLux === -1)) {
+		setText(lightLuxEl, valueToText(lastStatusLightLux));
+	} // -1 == BH1750 didn't read
+	setText(tempEl, valueToText(lastStatusTemp));
+	setText(humEl, valueToText(lastStatusHum));
+	setText(soilEl, valueToText(lastStatusSoil));
+	setText(uptimeEl, displayTime(lastUptime));
+	setText(lightStateEl, valueToText(lastDesiredLight));
+	setText(pumpStateEl, valueToText(lastDesiredPump));
+	setText(controlModeEl, valueToText(lastMode));
+	updateLastUpdateText();
 	updateControlsEnabledState();
 }
 
@@ -255,11 +251,8 @@ function updateLastUpdateText() {
 
 	if (deltaSec < 5) {
 		lastUpdateEl.textContent = `just now (${deltaSec}s ago)`;
-	} else if (deltaSec < 60) {
-		lastUpdateEl.textContent = `${deltaSec}s ago`;
 	} else {
-		const mins = Math.floor(deltaSec / 60);
-		lastUpdateEl.textContent = `${mins}m ago`;
+		lastUpdateEl.textContent = `${displayTime(deltaSec)} ago`;
 	}
 }
 
@@ -331,6 +324,7 @@ function attachMqttHandlers(client) {
 	// ---------- Message handling ----------
 	client.on("message", (topic, payload) => {
 		let msg = null;
+		let changed = false;
 		try {
 			msg = JSON.parse(payload.toString());
 		} catch (e) {
@@ -340,82 +334,47 @@ function attachMqttHandlers(client) {
 
 		if (topic.startsWith(`${ROOT_TOPIC}/status/`)) {
 			lastStatusTimestampMs = Date.now();
-			updateLastUpdateText();
+			changed = true;
+		}
+
+		// helper to update last status values
+		function ifMsgValueElseNull(value) {
+			return (msg && typeof msg[value] !== "undefined") ? msg[value] : null;
 		}
 
 		if (topic === `${ROOT_TOPIC}/status/light`) {
-			lastStatusLightLux = (msg && typeof msg.lux !== "undefined") ? msg.lux : null;
-			setText(lightLuxEl, lastStatusLightLux);
+			lastStatusLightLux = ifMsgValueElseNull("lux");
 		} else if (topic === `${ROOT_TOPIC}/status/environment`) {
-			lastStatusTemp = (msg && typeof msg.temperature_c !== "undefined") ? msg.temperature_c : null;
-			lastStatusHum  = (msg && typeof msg.humidity_pct !== "undefined") ? msg.humidity_pct : null;
-			setText(tempEl, lastStatusTemp);
-			setText(humEl, lastStatusHum);
+			lastStatusTemp = ifMsgValueElseNull("temperature_c");
+			lastStatusHum  = ifMsgValueElseNull("humidity_pct");
 		} else if (topic === `${ROOT_TOPIC}/status/soil`) {
-			lastStatusSoil = (msg && typeof msg.moisture !== "undefined") ? msg.moisture : null;
-			setText(soilEl, lastStatusSoil);
+			lastStatusSoil = ifMsgValueElseNull("moisture_pct");
 		} else if (topic === `${ROOT_TOPIC}/status/effectors`) {
-			if (msg) {
-				if (typeof msg.light_on !== "undefined") {
-					currentDesiredLight = !!msg.light_on;
-				} else {
-					currentDesiredLight = null;
-				}
-				if (typeof msg.pump_on !== "undefined") {
-					currentDesiredPump = !!msg.pump_on;
-				} else {
-					currentDesiredPump = null;
-				}
-				if (typeof msg.mode !== "undefined") {
-					currentMode = String(msg.mode);
-				} else {
-					currentMode = null;
-				}
-			} else {
-				currentDesiredLight = null;
-				currentDesiredPump = null;
-				currentMode = null;
-			}
-			applyDeviceStatusToUI(); // Reflect to UI
-
-			setText(controlModeEl, currentMode);
-
-			setText(lightStateEl,
-				currentDesiredLight === null ? null : (currentDesiredLight ? "ON" : "OFF")
-			);
-
-			setText(pumpStateEl,
-				currentDesiredPump === null ? null : (currentDesiredPump ? "ON" : "OFF")
-			);
+			lastDesiredLight = ifMsgValueElseNull("light_on");
+			lastDesiredPump  = ifMsgValueElseNull("pump_on");
+			lastMode         = ifMsgValueElseNull("mode");
 		} else if (topic === `${ROOT_TOPIC}/status/system`) {
-			if (msg && typeof msg.uptime_s === "number") {
-				const s = msg.uptime_s;
-				const h = Math.floor(s / 3600);
-				const m = Math.floor((s % 3600) / 60);
-				const sec = s % 60;
-
-				uptimeEl.textContent = `${h}h ${m}m ${sec}s`;
-			} else {
-				setText(uptimeEl, null);
-			}
+			lastUptime = ifMsgValueElseNull("uptime_s");
 		} else {
 			// ignore unknown topics
 		}
+
+		if (changed) applyDeviceStatusToUI();
 	});
 }
 
 // ---------- UI event wiring ----------
 
 // User edits the desired checkboxes: update edited buffer and enable send if allowed
-if (desiredLightCb) {
-	desiredLightCb.addEventListener("change", () => {
-		editedDesiredLight = desiredLightCb.checked;
+if (commandDesiredLightCb) {
+	commandDesiredLightCb.addEventListener("change", () => {
+		commandDesiredLight = commandDesiredLightCb.checked;
 		updateControlsEnabledState();
 	});
 }
-if (desiredPumpCb) {
-	desiredPumpCb.addEventListener("change", () => {
-		editedDesiredPump = desiredPumpCb.checked;
+if (commandDesiredPumpCb) {
+	commandDesiredPumpCb.addEventListener("change", () => {
+		commandDesiredPump = commandDesiredPumpCb.checked;
 		updateControlsEnabledState();
 	});
 }
@@ -423,32 +382,19 @@ if (desiredPumpCb) {
 // Mode selection (UI side) changes the edit buffer
 if (modeRadioAuto && modeRadioManual) {
 	modeRadioAuto.addEventListener("change", () => {
-		if (modeRadioAuto.checked) editedMode = "auto";
+		if (modeRadioAuto.checked) commandMode = "auto";
 		updateControlsEnabledState();
 	});
 	modeRadioManual.addEventListener("change", () => {
-		if (modeRadioManual.checked) editedMode = "manual";
+		if (modeRadioManual.checked) commandMode = "manual";
 		updateControlsEnabledState();
 	});
 }
 
 // Send commands: send cmd/mode first (if needed), then cmd/effectors (if needed).
-if (sendCommandsBtn) {
-	sendCommandsBtn.addEventListener("click", () => {
+if (commandSendBtn) {
+	commandSendBtn.addEventListener("click", () => {
 		if (!connected) return;
-
-		const toSendMode = (editedMode !== null && editedMode !== currentMode);
-		// build desired object from edited values; include only fields that were edited (not null)
-		const desiredPayload = {};
-		let anyEffEdited = false;
-		if (editedDesiredLight !== null) {
-			desiredPayload.light_on = !!editedDesiredLight;
-			anyEffEdited = true;
-		}
-		if (editedDesiredPump !== null) {
-			desiredPayload.pump_on = !!editedDesiredPump;
-			anyEffEdited = true;
-		}
 
 		// helper to publish JSON
 		function publish(topic, obj) {
@@ -461,26 +407,18 @@ if (sendCommandsBtn) {
 			}
 		}
 
-		// Sequence: if mode change requested, send it first with its own id.
-		if (toSendMode) {
-			const payload = { id: nextCmdId(), mode: editedMode };
-			publish(`${ROOT_TOPIC}/cmd/mode`, payload)
-			currentMode = editedMode;
-		}
+		const modePayload = { id: nextCmdId(), mode: commandMode };
+		publish(`${ROOT_TOPIC}/cmd/mode`, modePayload);
 
-		// Send effectors command if user edited effectors
-		if (anyEffEdited) {
-			const payload = { id: nextCmdId(), desired: desiredPayload };
-			publish(`${ROOT_TOPIC}/cmd/effectors`, payload);
-		}
-
-		// Clear edited buffers
-		editedDesiredLight = null;
-		editedDesiredPump = null;
-		editedMode = null;
-
-		// Update UI: disable checkboxes unless UI still in manual selection, recompute send button state
-		applyDeviceStatusToUI();
+		if (commandMode === "auto") return;
+		// if you send an effector payload it automatically overrides the mode into "manual"
+		const effectorPayload = {
+			id: nextCmdId(),
+			desired: {
+			"light_on": commandDesiredLight, "pump_on": commandDesiredPump
+			}
+		};
+		publish(`${ROOT_TOPIC}/cmd/effectors`, effectorPayload);
 	});
 }
 
@@ -494,7 +432,15 @@ setText(controlModeEl, null);
 setText(lightStateEl, null);
 setText(pumpStateEl, null);
 connectionStatusEl.textContent = "disconnected";
-desiredLightCb.disabled = true;
-desiredPumpCb.disabled = true;
-sendCommandsBtn.disabled = true;
+if (commandDesiredLightCb) {
+  commandDesiredLightCb.checked = !!commandDesiredLight;
+  commandDesiredLightCb.disabled = true;
+}
+if (commandDesiredPumpCb) {
+  commandDesiredPumpCb.checked = !!commandDesiredPump;
+  commandDesiredPumpCb.disabled = true;
+}
+if (commandSendBtn) {
+  commandSendBtn.disabled = true;
+}
 setInterval(updateLastUpdateText, 1000);
