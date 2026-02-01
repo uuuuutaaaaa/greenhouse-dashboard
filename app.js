@@ -17,18 +17,20 @@ const lightLuxEl                = document.getElementById("lightLux");
 const tempEl                    = document.getElementById("temperature");
 const humEl                     = document.getElementById("humidity");
 const soilEl                    = document.getElementById("soilMoisture");
+const envTimestampEl            = document.getElementById("envTimestamp");
 
 const uptimeEl                  = document.getElementById("uptime");
 const controlModeEl             = document.getElementById("controlMode");
 const lightStateEl              = document.getElementById("lightState");
 const pumpStateEl               = document.getElementById("pumpState");
+const sysTimestampEl            = document.getElementById("sysTimestamp");
 
 const modeRadioAuto             = document.querySelector('input[name="mode"][value="auto"]');
 const modeRadioManual           = document.querySelector('input[name="mode"][value="manual"]');
 
 const commandDesiredLightCb     = document.getElementById("desiredLight");
 const commandDesiredPumpCb      = document.getElementById("desiredPump");
-const commandSendBtn           = document.getElementById("sendCommandsButton");
+const commandSendBtn            = document.getElementById("sendCommandsButton");
 
 // Timestamp
 let lastStatusTimestampMs       = null;
@@ -43,12 +45,15 @@ let lastStatusLightLux  = null;
 let lastStatusTemp      = null;
 let lastStatusHum       = null;
 let lastStatusSoil      = null;
+let lastSensorTimestamp = null; // seconds
+
 
 // Last device state
-let lastUptime       = null; // number or null
-let lastDesiredLight = null; // boolean or null
-let lastDesiredPump  = null; // boolean or null
-let lastMode         = null; // "auto" | "manual" | null
+let lastUptime          = null; // number or null
+let lastDesiredLight    = null; // boolean or null
+let lastDesiredPump     = null; // boolean or null
+let lastMode            = null; // "auto" | "manual" | null
+let lastSystemTimestamp = null; // seconds
 
 // Edited device state from Commands
 let commandDesiredLight  = false;
@@ -197,6 +202,27 @@ function displayTime(seconds) {
 	return `${h}h ${m}m ${seconds % 60}s`;
 }
 
+function displayDateAndTimeSince(unixTimestampSeconds) {
+	if (unixTimestampSeconds === null ||
+		unixTimestampSeconds === undefined ||
+		Number.isNaN(unixTimestampSeconds ||
+		unixTimestampSeconds <= 1609459200 // 2021-01-01
+		)) return "—";
+	const d = new Date(unixTimestampSeconds * 1000);
+	const options = {
+		timeZone: 'Asia/Jakarta',
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		hour12: true,
+		weekday: 'long',
+		year: 'numeric',
+		month: 'long',
+		day: 'numeric'
+	};
+	return `${d.toLocaleDateString('en-US', options)}`; // WIB-7
+}
+
 function showMqttError(message, detail = null) {
 	if (!mqttErrorEl) return;
 
@@ -231,10 +257,12 @@ function applyDeviceStatusToUI() {
 	setText(tempEl, valueToText(lastStatusTemp));
 	setText(humEl, valueToText(lastStatusHum));
 	setText(soilEl, valueToText(lastStatusSoil));
+	setText(envTimestampEl, displayDateAndTimeSince(lastSensorTimestamp));
 	setText(uptimeEl, displayTime(lastUptime));
 	setText(lightStateEl, valueToText(lastDesiredLight));
 	setText(pumpStateEl, valueToText(lastDesiredPump));
 	setText(controlModeEl, valueToText(lastMode));
+	setText(sysTimestampEl, displayDateAndTimeSince(lastSystemTimestamp));
 	updateLastUpdateText();
 	updateControlsEnabledState();
 }
@@ -342,19 +370,21 @@ function attachMqttHandlers(client) {
 			return (msg && typeof msg[value] !== "undefined") ? msg[value] : null;
 		}
 
-		if (topic === `${ROOT_TOPIC}/status/light`) {
-			lastStatusLightLux = ifMsgValueElseNull("lux");
-		} else if (topic === `${ROOT_TOPIC}/status/environment`) {
-			lastStatusTemp = ifMsgValueElseNull("temperature_c");
-			lastStatusHum  = ifMsgValueElseNull("humidity_pct");
-		} else if (topic === `${ROOT_TOPIC}/status/soil`) {
-			lastStatusSoil = ifMsgValueElseNull("moisture_pct");
+		if (topic === `${ROOT_TOPIC}/status/sensors`) {
+			lastStatusLightLux  = ifMsgValueElseNull("lux");
+			lastStatusTemp      = ifMsgValueElseNull("temperature_c");
+			lastStatusHum       = ifMsgValueElseNull("humidity_pct");
+			lastStatusSoil      = ifMsgValueElseNull("soil_moisture_pct");
+			lastSensorTimestamp = ifMsgValueElseNull("timestamp");
 		} else if (topic === `${ROOT_TOPIC}/status/effectors`) {
-			lastDesiredLight = ifMsgValueElseNull("light_on");
-			lastDesiredPump  = ifMsgValueElseNull("pump_on");
-			lastMode         = ifMsgValueElseNull("mode");
+			lastDesiredLight    = ifMsgValueElseNull("light_on");
+			lastDesiredPump     = ifMsgValueElseNull("pump_on");
+			lastMode            = ifMsgValueElseNull("mode");
+			lastSystemTimestamp = ifMsgValueElseNull("timestamp");
 		} else if (topic === `${ROOT_TOPIC}/status/system`) {
-			lastUptime = ifMsgValueElseNull("uptime_s");
+			lastUptime          = ifMsgValueElseNull("uptime_s");
+			lastSystemTimestamp = ifMsgValueElseNull("timestamp");
+
 		} else {
 			// ignore unknown topics
 		}
