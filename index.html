@@ -42,28 +42,24 @@
 		}
 
 		.tooltip-container {
-			/* keep inline with text, align children vertically */
+			position: relative;
 			display: inline-flex;
-			align-items: center;    /* vertically center label + trigger */
+			align-items: center;
 			gap: 0.4rem;
-			vertical-align: middle; /* important so the whole container sits on the text baseline */
 		}
 
 		.tooltip-trigger {
 			all: unset;
 			cursor: pointer;
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
+			font-weight: bold;
 			width: 1.2rem;
 			height: 1.2rem;
-			padding: 0;
-			box-sizing: border-box;
+			line-height: 1.2rem;
+			text-align: center;
 			border-radius: 50%;
 			background: #444;
 			color: #fff;
-			font-size: 0.85rem;
-			line-height: 1;
+			font-size: 0.8rem;
 			transform: translateY(-0.1rem);
 		}
 
@@ -92,7 +88,9 @@
 			z-index: 10;
 		}
 
+		/* Show on hover (desktop) */
 		.tooltip-container:hover .tooltip-content,
+		/* Show on focus (keyboard + mobile tap) */
 		.tooltip-trigger:focus + .tooltip-content {
 			opacity: 1;
 			transform: translateY(0);
